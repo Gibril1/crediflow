@@ -1,64 +1,89 @@
 from fastapi import FastAPI, status, HTTPException
+import uvicorn
 from pydantic import BaseModel
 from typing import List
-from slack_service import slack_services
-import httpx
+from api_service import get_products_api
+from contextlib import asynccontextmanager
+import os
+from dotenv import load_dotenv
+import asyncio
+from slack_bolt.async_app import AsyncApp
+from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
+import re
+
+load_dotenv()
+
+
+# Initializes your app with your bot token and socket mode handler
+slack_app = AsyncApp(token=os.getenv("SLACK_BOT_TOKEN"))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    slack_handler = AsyncSocketModeHandler(slack_app, os.getenv("SLACK_APP_TOKEN"))
+
+    slack_handler_task = asyncio.create_task(slack_handler.start_async())
+
+    try:
+        yield  # The app is running here
+    finally:
+        slack_handler_task.cancel()
+        try:
+            await slack_handler_task
+        except asyncio.CancelledError:
+            pass
+
 
 # Init app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
+
 
 class ProductModel(BaseModel):
     name: str
     price: float
     description: str
 
-@app.get('/products', status_code=status.HTTP_200_OK, response_model=List[ProductModel])
-async def get_products(price_range:str = None,  limit: int = None):
-    try:
-        # Create an instance of AsyncClient
-        async with httpx.AsyncClient() as client:
-            response = await client.get("https://fakestoreapi.com/products")
-            response.raise_for_status()  
 
-        # Deserialize the response JSON
-        products = response.json()
+@app.get("/products", status_code=status.HTTP_200_OK, response_model=List[ProductModel])
+async def get_products(price_range: str = None, limit: int = None):
+    return await get_products_api(price_range, limit, say=True)
 
-        # Transform the API response to match ProductModel
-        transformed_products = [
-            {
-                "name": product["title"], 
-                "price": product["price"],
-                "description": product["description"]
-            }
-            for product in products
-        ]
 
-        # Optionally filter or limit results
-        if price_range:
-            min_price, max_price = map(float, price_range.split('-'))
-            transformed_products = [
-                product for product in transformed_products
-                if min_price <= product["price"] <= max_price
-            ]
-        if limit:
-            transformed_products = transformed_products[:limit]
+@slack_app.message(r"^query\s*-\s*(\d+)-(\d+)\s*-\s*(\d+)$")
+async def query_data(message, say):
+    text = message["text"]
 
-        # get the product with the smallest price
-        cheapest_product = min(transformed_products, key=lambda product: product["price"])
+    # Extract the range and number from the message using regex
+    match = re.match(r"^query\s*-\s*(\d+)-(\d+)\s*-\s*(\d+)$", text)
+    if match:
+        range_start, range_end, limit = map(int, match.groups())
+        price_range = f"{range_start}-{range_end}"
 
-        print(cheapest_product)
-        return transformed_products
+        try:
+            # Call the get_products_api function with extracted parameters
+            products = await get_products_api(price_range=price_range, limit=limit)
 
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    
+            # Construct a Slack message to display the result
+            response = (
+                f"Here are the top {limit} products in the price range {price_range}:\n"
+            )
+            for product in products:
+                response += f"- {product['name']} (${product['price']}): {product['description']}\n\n"
 
-@app.get('/slack_users', status_code=status.HTTP_200_OK)
-async def get_slack_users():
-    return await slack_services.get_all_slack_users()
+            await say(response)
+        except HTTPException as e:
+            await say(f"Error fetching products: {e.detail}")
+        except Exception as e:
+            await say(f"An unexpected error occurred: {str(e)}")
+    else:
+        await say(
+            "Invalid format. Please use `query - range (e.g., 100-200) - number (e.g., 5)`."
+        )
 
-@app.get('/send_message', status_code=status.HTTP_200_OK)
-async def send_message(channel_id: str, text: str):
-    return await slack_services.send_slack_message(channel_id, text)
+
+def run_uvicorn():
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    asyncio.run(run_uvicorn())
