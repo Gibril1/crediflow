@@ -1,6 +1,7 @@
 from fastapi import FastAPI, status, HTTPException
 from pydantic import BaseModel
 from typing import List
+from slack_service import slack_services
 import httpx
 
 # Init app
@@ -54,4 +55,10 @@ async def get_products(price_range:str = None,  limit: int = None):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     
 
+@app.get('/slack_users', status_code=status.HTTP_200_OK)
+async def get_slack_users():
+    return await slack_services.get_all_slack_users()
 
+@app.get('/send_message', status_code=status.HTTP_200_OK)
+async def send_message(channel_id: str, text: str):
+    return await slack_services.send_slack_message(channel_id, text)
