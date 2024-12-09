@@ -1,20 +1,28 @@
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 from slack import slack_services
 from typing import Dict
 import httpx
 
 
-def convert_product(product: Dict[str, str]):
+class ProductModel(BaseModel):
+    name: str
+    price: float
+    description: str
+
+
+def convert_product(product: ProductModel, cheap=False) -> str:
     message = f"""
-The detail for the cheapest item. \n\n
 - Name: {product["name"]} \n\n
 - Price: {product["price"]} \n\n
 - Description: {product["description"]} \n
 """
+    if cheap:
+        message += "\n\n. This is the cheapest product within this price range"
     return message
 
 
-async def get_products_api(price_range: str = None, limit: int = None, say=False):
+async def get_products_service(price_range: str = None, limit: int = None, say=False):
     try:
         # Create an instance of AsyncClient
         async with httpx.AsyncClient() as client:
@@ -51,7 +59,7 @@ async def get_products_api(price_range: str = None, limit: int = None, say=False
         )
 
         if say:
-            product_message = convert_product(cheapest_product)
+            product_message = convert_product(cheapest_product, cheap=True)
             await slack_services.send_slack_message(
                 channel="D0843NDTRL6", text=product_message
             )
