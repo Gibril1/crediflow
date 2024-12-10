@@ -1,6 +1,5 @@
 from fastapi import FastAPI, status, HTTPException
 import uvicorn
-from pydantic import BaseModel
 from typing import List
 from api_service import get_products_service, convert_product, ProductModel
 from contextlib import asynccontextmanager
@@ -76,7 +75,7 @@ async def query_data(message, say):
                 response += convert_product(product) + "\n\n"
             # add the queries to the database
             query = {"user": user, "query": text}
-            new_query = await query_collection.create_item(query)
+            await query_collection.create_item(query)
             logging.info("Query has been persisted in the database")
             await say(response)
         except HTTPException as e:
