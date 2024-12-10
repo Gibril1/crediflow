@@ -46,6 +46,12 @@ async def lifespan(app: FastAPI):
 # Init app
 app = FastAPI(lifespan=lifespan)
 
+@app.get('/', status_code=status.HTTP_200_OK)
+def root():
+    return {
+        "status": True,
+        "message": "Crediflow Technical Assesment"
+    }
 
 @app.get("/products", status_code=status.HTTP_200_OK, response_model=List[ProductModel])
 async def get_products(price_range: str = None, limit: int = None):
