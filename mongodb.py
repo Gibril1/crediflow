@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 DATABASE_URL = os.getenv("MONGODB_URL")
@@ -26,6 +27,7 @@ async def get_database():
 async def close_database_connection():
     if db.client is not None:
         db.client.close()
+        logger.info("MongoDB connection has closed")
 
 
 async def check_db_connection():
@@ -37,12 +39,13 @@ async def check_db_connection():
         database = client[DATABASE_NAME]
         collection_names = await database.list_collection_names()
 
+        logger.info("Logging collection names")
         for collection_name in collection_names:
-            logging.info(collection_name)
+            logger.info(collection_name)
 
         return True
     except Exception as e:
-        logging.error(f"Error connecting to the database: {e}")
+        logger.error(f"Error connecting to the database: {e}")
         return False
 
 

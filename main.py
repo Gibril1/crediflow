@@ -1,7 +1,7 @@
 from fastapi import FastAPI, status, HTTPException
 import uvicorn
-from typing import List
-from api_service import get_products_service, convert_product, ProductModel
+from typing import List, Optional
+from api_service import get_products_service, convert_product, ProductModel, FilterModel
 from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
@@ -9,10 +9,12 @@ import asyncio
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 import re
-from mongodb import check_db_connection, query_collection
+from mongodb import check_db_connection, close_database_connection,query_collection
 import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 # Initializes your app with your bot token and socket mode handler
@@ -42,6 +44,8 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+        await close_database_connection()
+
 
 # Init app
 app = FastAPI(lifespan=lifespan)
@@ -55,7 +59,13 @@ def root():
 
 @app.get("/products", status_code=status.HTTP_200_OK, response_model=List[ProductModel])
 async def get_products(price_range: str = None, limit: int = None):
-    return await get_products_service(price_range, limit, say=True)
+    filter_model = FilterModel(price_range=price_range, limit=limit)
+    return await get_products_service(filter_model, say=True)
+
+@app.get("/rated_products", status_code=status.HTTP_200_OK, response_model=List[ProductModel])
+async def get_top_rated_products(price_range: str = None, limit: int = None, rating_number:int = None):
+    filter_model = FilterModel(price_range=price_range, limit=limit, rating_number=rating_number)
+    return await get_products_service(filter_model, say=True)
 
 
 @slack_app.message(r"^query\s*-\s*(\d+)-(\d+)\s*-\s*(\d+)$")
@@ -82,7 +92,7 @@ async def query_data(message, say):
             # add the queries to the database
             query = {"user": user, "query": text}
             await query_collection.create_item(query)
-            logging.info("Query has been persisted in the database")
+            logger.info("Query has been persisted in the database")
             await say(response)
         except HTTPException as e:
             await say(f"Error fetching products: {e.detail}")
